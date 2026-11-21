@@ -1,0 +1,4 @@
+category,image_AUROC_original,image_F1Score_original,pixel_AUROC_original,pixel_F1Score_original,image_AUROC_lighting_mean,image_F1Score_lighting_mean,pixel_AUROC_lighting_mean,pixel_F1Score_lighting_mean,image_AUROC_delta,image_AUROC_change_pct,image_F1Score_delta,image_F1Score_change_pct,pixel_AUROC_delta,pixel_AUROC_change_pct,pixel_F1Score_delta,pixel_F1Score_change_pct
+metal_nut,0.996090,0.983784,0.986860,0.838645,0.994037,0.969454,0.985275,0.816747,-0.002053,-0.206089,-0.014330,-1.456611,-0.001585,-0.160586,-0.021898,-2.611138
+screw,0.969461,0.946058,0.989209,0.369759,0.930211,0.898962,0.972896,0.263615,-0.039250,-4.048626,-0.047096,-4.978166,-0.016313,-1.649049,-0.106144,-28.706343
+transistor,0.991250,0.935065,0.972621,0.608358,0.984472,0.925789,0.969589,0.553741,-0.006778,-0.683765,-0.009276,-0.991996,-0.003032,-0.311689,-0.054617,-8.977763

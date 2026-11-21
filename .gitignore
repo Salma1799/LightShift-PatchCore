@@ -1,0 +1,32 @@
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Original and processed datasets
+data/raw/
+data/processed/
+
+# Model checkpoints and weights
+results/Patchcore/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+
+# Logs and temporary files
+*.log
+.DS_Store
+Thumbs.db
+
+# Intermediate evaluation backup
+results/lighting_evaluation_backup_30.csv

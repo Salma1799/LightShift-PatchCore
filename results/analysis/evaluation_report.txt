@@ -1,0 +1,12 @@
+PATCHCORE LIGHTING EVALUATION REPORT
+=============================================
+Expected configurations: 45
+Successful configurations: 45
+Missing configurations: 0
+Unsuccessful CSV rows: 0
+Duplicate successful rows: 0
+Missing metric values: 0
+Metric values outside [0, 1]: 0
+
+MISSING CONFIGURATIONS:
+None
