@@ -112,6 +112,7 @@
     padding: 6px 12px; border-radius: 999px; font-size: .85rem; display: none;
   }
   .stage[data-busy="true"] .busy { display: block; }
+  .stage.drag { box-shadow: 0 0 0 3px var(--lamp); }
 
   .booth-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 14px; color: #DCE3E7; font-size: .92rem; }
   .booth-controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 260px; }
@@ -313,7 +314,7 @@
           <label>Zones suspectes
             <input type="range" id="overlayRange" min="0" max="100" value="55" aria-label="Afficher les zones suspectes">
           </label>
-          <button class="link-btn" type="button" id="changePart">Changer de pièce</button>
+          <button class="link-btn" type="button" id="changePart">Choisir une photo sur mon PC</button>
           <button class="link-btn" type="button" data-example="good">Pièce saine</button>
           <button class="link-btn" type="button" data-example="bad">Pièce abîmée</button>
         </div>
@@ -885,9 +886,11 @@
   const dz = $("dropzone");
   dz.addEventListener("click", (e) => { if (!e.target.closest("[data-example]")) $("fileInput").click(); });
   dz.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileInput").click(); } });
-  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
-  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("drag"); }));
-  dz.addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
+  // Glisser-déposer sur toute la cabine, même quand une pièce est déjà affichée
+  const stage = $("stage");
+  ["dragenter", "dragover"].forEach((ev) => stage.addEventListener(ev, (e) => { e.preventDefault(); stage.classList.add("drag"); dz.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => stage.addEventListener(ev, (e) => { e.preventDefault(); stage.classList.remove("drag"); dz.classList.remove("drag"); }));
+  stage.addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
   $("fileInput").addEventListener("change", (e) => { pickFile(e.target.files[0]); e.target.value = ""; });
   $("changePart").addEventListener("click", () => $("fileInput").click());
   document.querySelectorAll("[data-example]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); loadExample(b.dataset.example); }));
