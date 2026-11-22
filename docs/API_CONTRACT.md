@@ -14,7 +14,7 @@ Documentation interactive : `http://localhost:8000/docs` (générée automatique
 | `/calibrate` | POST | Brique B3 : recalculer le seuil avec des images normales d'un nouvel éclairage |
 | `/calibrate/{category}` | DELETE | Revenir au seuil par défaut |
 | `/drift` | POST | Vue de dérive : score d'une image sous les 16 conditions de lumière, pour les deux méthodes |
-| `/examples/{category}` | GET | Pièce d'exemple synthétique PNG (`kind=good|bad`, `seed`), pour la démo |
+| `/examples/{category}` | GET | Pièce d'exemple pour la démo : vraie photo MVTec (si le vrai modèle et le dataset sont là) ou pièce dessinée. `kind=good|bad|calibration`, `seed`, `defect` (optionnel). En-têtes `X-Example-Source`, `X-Example-Name`, `X-Example-Defect` |
 | `/metrics` | GET | Compteurs (analyses, décisions, latence moyenne, **p50 et p95**, seuils actuels) |
 
 Valeurs autorisées :
@@ -111,6 +111,14 @@ L'image est analysée sous la lumière normale puis sous les 15 conditions de l'
 
 Si une méthode n'est pas encore disponible (LightShift avant la livraison du membre 2),
 `points` est vide et `error` explique pourquoi.
+
+## Scores du vrai PatchCore
+
+Par défaut (`SCORE_MODE=raw`), l'API renvoie les **scores bruts** de PatchCore, avant le
+post-processor d'anomalib, et la limite par défaut est la limite brute apprise par anomalib
+(`post_processor.image_threshold`). Le post-processor normalise et **coupe** les scores dans [0, 1] :
+sous un fort changement de lumière, toutes les images vaudraient 1,0 et la recalibration (B3) ne
+pourrait plus rien distinguer. `SCORE_MODE=normalized` rétablit les scores normalisés (limite 0,5).
 
 ## GET /metrics
 

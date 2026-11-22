@@ -6,7 +6,7 @@ Tout modèle branché dans l'application doit fournir :
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Optional, Protocol
 
 import numpy as np
 
@@ -15,6 +15,7 @@ import numpy as np
 class Prediction:
     score: float              # score d'anomalie image (plus haut = plus suspect)
     anomaly_map: np.ndarray   # carte (H, W) float, même taille que l'image ou redimensionnable
+    map_threshold: Optional[float] = None  # limite pour colorer la carte (sinon : limite image)
 
 
 class AnomalyModel(Protocol):

@@ -42,6 +42,8 @@ class HealthResponse(BaseModel):
     model_version: str
     categories: list[str]
     methods: list[str]
+    examples_source: dict[str, str] = Field(
+        default_factory=dict, description="Par catégorie : 'mvtec' (vraies photos) ou 'synthetic' (pièces dessinées)")
 
 
 class ErrorResponse(BaseModel):

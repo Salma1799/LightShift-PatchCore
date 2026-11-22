@@ -22,6 +22,7 @@ from app.api.schemas import (CalibrateResponse, DriftPoint, DriftResponse, Drift
                              HealthResponse, PredictResponse)
 from app.core.conformal import conformal_threshold, is_anomaly, min_calibration_size
 from app.core.imaging import InvalidImageError, decode_image, encode_png_base64, heatmap_overlay
+from app.core import mvtec
 from app.core.lighting import apply_lighting_shift
 from app.core.thresholds import ThresholdStore
 from app.models.examples import draw_part
@@ -106,7 +107,10 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         saved = store.get(model.name, method, category)
         if saved is not None:
             return float(saved["threshold"]), "calibrated"
-        return float(model.default_threshold(category, method)), "default"
+        try:
+            return float(model.default_threshold(category, method)), "default"
+        except FileNotFoundError as exc:      # pas de checkpoint pour cette catégorie
+            raise HTTPException(503, str(exc)) from exc
 
     def run_model(image, category: str, method: str):
         if not model.is_ready():
@@ -124,21 +128,46 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         """Interface web (banc d'inspection)."""
         return FileResponse(WEB_DIR / "index.html", media_type="text/html")
 
-    @api.get("/examples/{category}", responses={200: {"content": {"image/png": {}}}})
-    def example(category: str, kind: str = "good", seed: int = 1):
-        """Pièce d'exemple synthétique (saine ou abîmée) pour la démo."""
+    def examples_source(category: str) -> str:
+        if config.EXAMPLES_SOURCE == "synthetic":
+            return "synthetic"
+        if config.EXAMPLES_SOURCE == "mvtec":
+            return "mvtec"
+        # auto : le modèle de démo ne connaît pas les photos MVTec, on ne les propose qu'au vrai modèle
+        return "mvtec" if model.name != "mock" and mvtec.is_available(category) else "synthetic"
+
+    @api.get("/examples/{category}", responses={200: {"content": {"image/png": {}, "image/jpeg": {}}}})
+    def example(category: str, kind: str = "good", seed: int = 1, defect: Optional[str] = None):
+        """Pièce d'exemple pour la démo.
+
+        kind : good (pièce saine à juger), bad (pièce défectueuse), calibration (pièce saine
+        réservée à la recalibration). Avec les vraies photos MVTec, les en-têtes X-Example-*
+        indiquent le fichier choisi et le type de défaut.
+        """
         check_category(category)
-        if kind not in ("good", "bad"):
-            raise HTTPException(422, "kind doit valoir 'good' (saine) ou 'bad' (abîmée).")
-        png = base64.b64decode(encode_png_base64(draw_part(category, kind == "bad", seed)))
-        return Response(content=png, media_type="image/png")
+        if kind not in ("good", "bad", "calibration"):
+            raise HTTPException(422, "kind doit valoir 'good', 'bad' ou 'calibration'.")
+        if examples_source(category) == "mvtec":
+            try:
+                path = mvtec.pick(category, kind, seed, defect)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, str(exc)) from exc
+            media = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+            headers = {"X-Example-Source": "mvtec", "X-Example-Name": mvtec.label(path),
+                       "X-Example-Defect": path.parent.name if kind == "bad" else ""}
+            return FileResponse(path, media_type=media, headers=headers)
+        png = base64.b64decode(encode_png_base64(
+            draw_part(category, kind == "bad", seed + (5000 if kind == "calibration" else 0))))
+        return Response(content=png, media_type="image/png",
+                        headers={"X-Example-Source": "synthetic", "X-Example-Name": "", "X-Example-Defect": ""})
 
     @api.get("/health", response_model=HealthResponse)
     def health():
         ready = model.is_ready()
         return HealthResponse(status="ok" if ready else "degraded", model_loaded=ready,
                               model_backend=model.name, model_version=model.version,
-                              categories=config.CATEGORIES, methods=config.METHODS)
+                              categories=config.CATEGORIES, methods=config.METHODS,
+                              examples_source={c: examples_source(c) for c in config.CATEGORIES})
 
     @api.post("/predict", response_model=PredictResponse, responses=ERRORS)
     async def predict(
@@ -174,7 +203,8 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         return PredictResponse(
             category=category, method=method, score=round(pred.score, 6),
             threshold=round(threshold, 6), threshold_source=source, decision=decision,
-            anomaly_map=encode_png_base64(heatmap_overlay(rgb, pred.anomaly_map, threshold)),
+            anomaly_map=encode_png_base64(heatmap_overlay(
+                rgb, pred.anomaly_map, pred.map_threshold if pred.map_threshold is not None else threshold)),
             processed_image=encode_png_base64(rgb) if shift else None,
             applied_shift=shift, applied_severity=severity if shift else None,
             inference_time_ms=round(elapsed_ms, 2),
@@ -274,10 +304,15 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
     @api.get("/metrics")
     def get_metrics():
         snap = metrics.snapshot()
-        snap["thresholds"] = {
-            f"{m}:{c}": dict(zip(("threshold", "source"), current_threshold(c, m)))
-            for m in config.METHODS for c in config.CATEGORIES
-        }
+        thresholds = {}
+        for m in config.METHODS:
+            for c in config.CATEGORIES:
+                try:
+                    t, src = current_threshold(c, m)
+                    thresholds[f"{m}:{c}"] = {"threshold": t, "source": src}
+                except HTTPException:
+                    thresholds[f"{m}:{c}"] = {"threshold": None, "source": "unavailable"}
+        snap["thresholds"] = thresholds
         return snap
 
     return api

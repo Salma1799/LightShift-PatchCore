@@ -18,6 +18,18 @@ CHECKPOINT_ROOT = Path(
     os.getenv("CHECKPOINT_ROOT", REPO_ROOT / "results" / "Patchcore" / "MVTecAD")
 )
 
+# Vrai PatchCore : "raw" (scores bruts, recommandé pour la recalibration) ou "normalized" (0..1 d'anomalib)
+SCORE_MODE = os.getenv("SCORE_MODE", "raw").lower()
+
+# Vraies photos MVTec AD (téléchargées par chacun, non versionnées)
+MVTEC_ROOT = Path(os.getenv("MVTEC_ROOT", REPO_ROOT / "data" / "raw" / "mvtec_anomaly_detection"))
+
+# D'où viennent les pièces des boutons « Essayer » :
+#   auto      -> photos MVTec si le vrai PatchCore est branché et le dataset présent, sinon pièces dessinées
+#   mvtec     -> toujours MVTec (erreur si absent)
+#   synthetic -> toujours les pièces dessinées
+EXAMPLES_SOURCE = os.getenv("EXAMPLES_SOURCE", "auto").lower()
+
 # Fichier où sont stockés les seuils recalibrés via /calibrate
 STATE_DIR = Path(os.getenv("STATE_DIR", REPO_ROOT / "app_state"))
 

@@ -116,6 +116,7 @@
   .booth-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 14px; color: #DCE3E7; font-size: .92rem; }
   .booth-controls label { display: flex; align-items: center; gap: 10px; flex: 1 1 260px; }
   .booth-controls input[type=range] { flex: 1; accent-color: var(--fail); }
+  .source-note { margin: 10px 0 0; color: #AEBBC3; font-size: .85rem; min-height: 1.2em; overflow-wrap: anywhere; }
   .link-btn { background: none; border: 0; color: #DCE3E7; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 4px 0; }
 
   .btn {
@@ -316,6 +317,7 @@
           <button class="link-btn" type="button" data-example="good">Pièce saine</button>
           <button class="link-btn" type="button" data-example="bad">Pièce abîmée</button>
         </div>
+        <p class="source-note" id="sourceNote" aria-live="polite"></p>
       </div>
 
       <!-- ---------------------------------------------------------- console -->
@@ -434,7 +436,7 @@
       <div class="field">
         <span>Pièces saines à utiliser</span>
         <div class="choices" role="group" aria-label="Source des pièces saines" id="recalSource">
-          <button type="button" class="choice" data-source="generated" aria-pressed="true">Pièces d'exemple générées</button>
+          <button type="button" class="choice" data-source="generated" aria-pressed="true">Pièces saines d'exemple</button>
           <button type="button" class="choice" data-source="upload" aria-pressed="false">Mes propres photos</button>
         </div>
         <input type="file" id="recalFiles" accept="image/png,image/jpeg" multiple class="visually-hidden">
@@ -492,7 +494,7 @@
   const state = {
     category: "metal_nut", method: "baseline", shift: null, severity: 2, alpha: 0.1,
     source: "generated", image: null,   // { blob, name, kind: "good"|"bad"|"upload", url }
-    backend: null, history: [], requestId: 0, calibratedFor: null, driftFor: null,
+    backend: null, history: [], requestId: 0, calibratedFor: null, driftFor: null, examplesSource: {},
   };
 
   const $ = (id) => document.getElementById(id);
@@ -500,8 +502,14 @@
   // ------------------------------------------------------------------ pièces d'exemple (générées par le serveur)
   async function exampleBlob(kind, seed) {
     const resp = await fetch(`/examples/${state.category}?kind=${kind}&seed=${seed}`);
-    if (!resp.ok) throw new Error("Impossible de charger la pièce d'exemple.");
-    return resp.blob();
+    if (!resp.ok) {
+      let detail = "Impossible de charger la pièce d'exemple.";
+      try { detail = (await resp.json()).detail || detail; } catch { /* corps non JSON */ }
+      throw new Error(detail);
+    }
+    const blob = await resp.blob();
+    blob.meta = { source: resp.headers.get("X-Example-Source"), name: resp.headers.get("X-Example-Name"), defect: resp.headers.get("X-Example-Defect") };
+    return blob;
   }
 
   // ------------------------------------------------------------------ API
@@ -518,6 +526,8 @@
     try {
       const h = await api("/health");
       state.backend = h.model_backend;
+      state.examplesSource = h.examples_source || {};
+      updateRecalHint();
       if (h.status !== "ok") { st.dataset.state = "down"; st.lastElementChild.textContent = "Modèle indisponible"; showBanner("Le modèle n'est pas chargé (fichiers du modèle manquants). Les analyses sont impossibles pour l'instant."); }
       else if (h.model_backend === "mock") { st.dataset.state = "demo"; st.lastElementChild.textContent = "Modèle de démonstration"; st.title = "Les scores sont simulés : le vrai PatchCore n'est pas encore branché."; }
       else { st.dataset.state = "ok"; st.lastElementChild.textContent = "PatchCore connecté"; }
@@ -535,7 +545,7 @@
     Object.entries(CATEGORIES).forEach(([id, label]) => {
       const b = document.createElement("button"); b.type = "button"; b.textContent = label;
       b.setAttribute("aria-pressed", String(id === state.category));
-      b.onclick = () => { state.category = id; renderCategories(); if (state.image && state.image.kind !== "upload") loadExample(state.image.kind); else analyse(); };
+      b.onclick = () => { state.category = id; renderCategories(); updateRecalHint(); if (state.image && state.image.kind !== "upload") loadExample(state.image.kind); else analyse(); };
       wrap.appendChild(b);
     });
   }
@@ -569,6 +579,10 @@
   // ------------------------------------------------------------------ chargement d'une pièce
   async function setImage(blob, name, kind) {
     state.image = { blob, name, kind, url: URL.createObjectURL(blob) };
+    const meta = blob.meta || {};
+    $("sourceNote").textContent = kind === "upload" ? `Votre photo : ${name}`
+      : meta.source === "mvtec" ? `Photo réelle MVTec AD : ${meta.name}${meta.defect ? ` (défaut : ${meta.defect.replaceAll("_", " ")})` : ""}`
+      : "Pièce d'exemple dessinée (mode démo)";
     $("dropzone").hidden = true; $("boothControls").hidden = false;
     $("step1").dataset.done = "true";
     analyse();
@@ -813,8 +827,11 @@
   function updateRecalHint() {
     const need = minImages(state.alpha);
     const files = $("recalFiles").files;
+    const real = (state.examplesSource || {})[state.category] === "mvtec";
     $("recalSourceHint").textContent = state.source === "generated"
-      ? `On génère ${Math.max(20, need)} pièces saines et on leur applique la lumière choisie (au moins ${need} sont nécessaires pour ce réglage).`
+      ? (real
+        ? `On prend ${Math.max(20, need)} photos saines MVTec réservées à la recalibration (jamais proposées à l'essai) et on leur applique la lumière choisie.`
+        : `On génère ${Math.max(20, need)} pièces saines et on leur applique la lumière choisie (au moins ${need} sont nécessaires pour ce réglage).`)
       : (files.length ? `${files.length} photo(s) choisie(s). Il en faut au moins ${need}.` : `Choisissez au moins ${need} photos de pièces saines prises sous la nouvelle lumière.`);
   }
 
@@ -826,7 +843,7 @@
       fd.append("category", state.category); fd.append("alpha", String(state.alpha)); fd.append("method", state.method);
       if (state.source === "generated") {
         const n = Math.max(20, minImages(state.alpha));
-        const blobs = await Promise.all([...Array(n)].map((_, i) => exampleBlob("good", 5000 + i)));
+        const blobs = await Promise.all([...Array(n)].map((_, i) => exampleBlob("calibration", i)));
         blobs.forEach((b, i) => fd.append("images", b, `saine-${i}.png`));
         if (state.shift) { fd.append("shift", state.shift); fd.append("severity", String(state.severity)); }
       } else {

@@ -49,26 +49,52 @@ le comportement du vrai modèle :
 ⚠️ Ses scores n'ont aucune valeur scientifique. Il est pensé pour les pièces d'exemple : une vraie
 photo MVTec sera jugée « inconnue ». Pour MVTec, il faut le vrai modèle.
 
-## Passer au vrai PatchCore
+## Passer au vrai PatchCore avec les photos MVTec AD
 
-1. Installer : `python -m pip install -r requirements.txt` (torch CPU + anomalib 2.7.1).
-2. Placer les 3 checkpoints : `results/Patchcore/MVTecAD/<category>/latest/weights/lightning/model.ckpt`.
-3. Lancer :
+1. **Dataset** : télécharger MVTec AD sur le site officiel (licence CC BY-NC-SA 4.0) et placer
+   `metal_nut`, `screw` et `transistor` dans `data/raw/mvtec_anomaly_detection/`.
+2. **Checkpoints** : demander les 3 `model.ckpt` au membre 1 et les placer dans
+   `results/Patchcore/MVTecAD/<category>/latest/weights/lightning/model.ckpt`.
+   Sinon, les recréer avec `python src/models/train_patchcore.py --category <category>`.
+3. **Dépendances lourdes** : `python -m pip install -r requirements.txt` (torch CPU + anomalib 2.7.1).
+4. **Vérifier le branchement** :
    ```powershell
-   $env:MODEL_BACKEND="patchcore"; python -m uvicorn app.api.main:app
+   python scripts/check_patchcore.py
    ```
-4. Vérifier que l'en-tête de l'interface indique « PatchCore connecté ».
+   Le script analyse des photos saines et défectueuses de chaque catégorie, compare les scores et
+   mesure la latence. Il termine par « ✓ branchement OK » ou indique ce qui manque.
+5. **Lancer l'application** :
+   ```powershell
+   $env:MODEL_BACKEND="patchcore"; python -m uvicorn app.api.main:app --reload
+   ```
+   L'en-tête indique « PatchCore connecté ». Les boutons « Essayer » proposent alors de **vraies
+   photos MVTec**, avec leur nom de fichier et le type de défaut affichés sous la cabine.
 
-La méthode LightShift avec le vrai modèle attend le code du membre 2 :
-`_predict_lightshift()` dans `app/models/patchcore_backend.py`.
+### Quelles photos MVTec sont utilisées ?
 
-### Checklist à la réception des checkpoints
+| Usage | Photos | Pourquoi |
+|---|---|---|
+| « Essayer une pièce saine » | `test/good`, une photo sur deux (indices impairs) | Photos jamais vues par le modèle |
+| « Essayer une pièce abîmée » | `test/<type_de_défaut>/` | Vrais défauts annotés par MVTec |
+| Recalibration (« Pièces saines d'exemple ») | `test/good`, l'autre moitié (indices pairs) | Jamais proposée à l'essai : pas de fuite entre calibration et verdict |
+| — | `train/good` | **Jamais utilisé** : ces photos ont construit la mémoire de PatchCore |
 
-- [ ] `/health` renvoie `ok` avec `MODEL_BACKEND=patchcore`
-- [ ] Une image `test/good` et une image défectueuse donnent des scores cohérents (défaut > normal)
-- [ ] Les zones rouges tombent sur le défaut (comparer au masque `ground_truth`)
-- [ ] Le score d'une image correspond à celui des scripts d'évaluation du membre 1
-- [ ] Noter le temps d'analyse CPU dans le rapport
+Vous pouvez aussi déposer n'importe quelle photo dans la cabine. Prenez les photos **d'origine** :
+c'est la console de l'atelier qui applique les changements de lumière.
+
+### Scores bruts
+
+L'application utilise les scores **bruts** de PatchCore et la limite apprise par anomalib (voir
+`docs/API_CONTRACT.md`). Les scores normalisés d'anomalib sont coupés à 1, ce qui empêcherait la
+recalibration sous un fort changement de lumière.
+
+### Ce qui a été vérifié
+
+Le branchement a été testé avec anomalib 2.7.1 et torch 2.15 (les versions du membre 1). Pour ce
+test, un checkpoint a été entraîné avec `src/models/train_patchcore.py`, sur une fausse arborescence
+MVTec et avec `pre_trained=False`, faute d'accès aux poids ImageNet : chargement, scores, carte des
+défauts, recalibration, dérive, catégorie sans checkpoint (503), LightShift pas encore livré (501).
+**À refaire avec les vrais checkpoints** grâce à `scripts/check_patchcore.py`.
 
 ## Intégration continue
 

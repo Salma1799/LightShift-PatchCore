@@ -10,5 +10,5 @@ def build_model(backend: str | None = None):
         return MockModel()
     if backend == "patchcore":
         from app.models.patchcore_backend import PatchcoreModel
-        return PatchcoreModel(config.CHECKPOINT_ROOT, config.CATEGORIES)
+        return PatchcoreModel(config.CHECKPOINT_ROOT, config.CATEGORIES, config.SCORE_MODE)
     raise ValueError(f"MODEL_BACKEND inconnu : {backend} (attendu : mock ou patchcore)")
