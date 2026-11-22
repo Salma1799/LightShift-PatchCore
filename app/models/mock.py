@@ -28,7 +28,7 @@ from app.models.examples import draw_part
 RES = 96          # résolution de travail
 PATCH = 8         # taille d'un patch
 STRIDE = 4
-N_MEMORY = 24     # pièces saines dans la mémoire
+N_MEMORY = 32     # pièces saines dans la mémoire
 FEAT = 4          # chaque patch est résumé en FEAT x FEAT x 3 valeurs
 
 
@@ -50,17 +50,29 @@ def _patch_features(rgb: np.ndarray, normalize: bool):
     return feats, n
 
 
+# Mémoires partagées entre toutes les instances : elles sont déterministes.
+_MEMORY: dict = {}
+_SCALE: dict = {}
+_LOCK = threading.Lock()
+
+
 class MockModel:
     name = "mock"
-    version = "mini-patchcore-demo-0.2"
+    version = "mini-patchcore-demo-0.3"
 
     def __init__(self):
-        self._memory = {}
-        self._scale = {}
-        self._lock = threading.Lock()
+        self._memory = _MEMORY
+        self._scale = _SCALE
+        self._lock = _LOCK
 
     def is_ready(self) -> bool:
         return True
+
+    def warm_up(self, categories, methods) -> None:
+        """Construit les mémoires à l'avance (appelé en arrière-plan au démarrage de l'API)."""
+        for category in categories:
+            for method in methods:
+                self._bank(category, method == "lightshift")
 
     def default_threshold(self, category: str, method: str) -> float:
         return 0.5
@@ -75,8 +87,8 @@ class MockModel:
                 self._memory[key] = (bank, (bank ** 2).sum(1))
                 # échelle : distance max des pièces saines (hors mémoire) -> score 0.5 un peu au-dessus
                 held_out = [self._raw_distance(draw_part(category, False, 20_000 + i), category, normalize)[0]
-                            for i in range(16)]
-                self._scale[key] = float(np.max(held_out)) * 1.2
+                            for i in range(64)]
+                self._scale[key] = float(np.max(held_out)) * 1.25
             return self._memory[key]
 
     def _raw_distance(self, rgb, category, normalize):

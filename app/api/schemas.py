@@ -46,3 +46,23 @@ class HealthResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class DriftPoint(BaseModel):
+    shift: Optional[str] = Field(None, description="None = lumière normale")
+    severity: Optional[int] = None
+    score: float
+    alert: bool = Field(description="True si le score dépasse la limite de la méthode")
+
+
+class DriftSeries(BaseModel):
+    method: str
+    threshold: float
+    threshold_source: Literal["default", "calibrated"]
+    points: list[DriftPoint]
+    error: Optional[str] = Field(None, description="Renseigné si la méthode n'est pas disponible")
+
+
+class DriftResponse(BaseModel):
+    category: str
+    series: list[DriftSeries]

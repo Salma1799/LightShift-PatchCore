@@ -6,16 +6,20 @@ Docs   :  http://localhost:8000/docs
 
 import base64
 import math
+import os
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 
 from app import config
-from app.api.schemas import CalibrateResponse, ErrorResponse, HealthResponse, PredictResponse
+from app.api.schemas import (CalibrateResponse, DriftPoint, DriftResponse, DriftSeries, ErrorResponse,
+                             HealthResponse, PredictResponse)
 from app.core.conformal import conformal_threshold, is_anomaly, min_calibration_size
 from app.core.imaging import InvalidImageError, decode_image, encode_png_base64, heatmap_overlay
 from app.core.lighting import apply_lighting_shift
@@ -30,8 +34,11 @@ ERRORS = {400: {"model": ErrorResponse}, 422: {"model": ErrorResponse},
 
 
 class Metrics:
+    WINDOW = 500   # latences gardées pour les percentiles
+
     def __init__(self):
         self._lock = threading.Lock()
+        self.latencies = deque(maxlen=self.WINDOW)
         self.data = {"predict_requests": 0, "predict_errors": 0, "decisions": {"normal": 0, "anomaly": 0},
                      "calibrations": 0, "total_inference_ms": 0.0}
 
@@ -40,6 +47,7 @@ class Metrics:
             self.data["predict_requests"] += 1
             self.data["decisions"][decision] += 1
             self.data["total_inference_ms"] += ms
+            self.latencies.append(ms)
 
     def record_error(self):
         with self._lock:
@@ -54,11 +62,19 @@ class Metrics:
             n = self.data["predict_requests"]
             out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in self.data.items()}
             out["mean_inference_ms"] = round(self.data["total_inference_ms"] / n, 2) if n else None
+            lat = np.array(self.latencies)
+            out["latency_ms"] = {
+                "p50": round(float(np.percentile(lat, 50)), 2) if lat.size else None,
+                "p95": round(float(np.percentile(lat, 95)), 2) if lat.size else None,
+                "window": int(lat.size),
+            }
             return out
 
 
 def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) -> FastAPI:
     model = build_model(backend)
+    if hasattr(model, "warm_up") and os.getenv("WARM_UP", "1") == "1":   # évite qu'une première analyse lente fausse la latence p95
+        threading.Thread(target=model.warm_up, args=(config.CATEGORIES, config.METHODS), daemon=True).start()
     store = ThresholdStore(state_dir or config.STATE_DIR)
     metrics = Metrics()
 
@@ -216,6 +232,35 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
             note=("Garantie : FPR <= alpha en moyenne si les futures images normales viennent du même "
                   "éclairage que ces images. Aucune garantie sur le rappel des défauts."),
         )
+
+    @api.post("/drift", response_model=DriftResponse, responses=ERRORS)
+    async def drift(
+        image: UploadFile = File(..., description="Image PNG ou JPG"),
+        category: str = Form(...),
+    ):
+        """Vue de dérive : score de la même image sous chaque lumière et chaque intensité,
+        pour les deux méthodes, avec la limite actuelle de chacune."""
+        check_category(category)
+        rgb = await read_image(image)
+        if not model.is_ready():
+            raise HTTPException(503, "Modèle non disponible (checkpoints manquants ?). Voir /health.")
+
+        conditions = [(None, 0)] + [(s, v) for s in config.SHIFTS for v in config.SEVERITIES]
+        variants = {cond: (apply_lighting_shift(rgb, *cond) if cond[0] else rgb) for cond in conditions}
+        series = []
+        for method in config.METHODS:
+            threshold, source = current_threshold(category, method)
+            points, error = [], None
+            try:
+                for (shift, sev), img in variants.items():
+                    score = model.predict(img, category, method).score
+                    points.append(DriftPoint(shift=shift, severity=sev or None, score=round(score, 6),
+                                             alert=is_anomaly(score, threshold)))
+            except NotImplementedError as exc:
+                points, error = [], str(exc)
+            series.append(DriftSeries(method=method, threshold=round(threshold, 6),
+                                      threshold_source=source, points=points, error=error))
+        return DriftResponse(category=category, series=series)
 
     @api.delete("/calibrate/{category}")
     def reset_calibration(category: str, method: str = "baseline"):

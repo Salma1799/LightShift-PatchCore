@@ -28,7 +28,9 @@ Ouvrir ensuite :
 | Cabine | Déposer une photo, ou essayer une pièce saine ou abîmée générée. Le curseur « Zones suspectes » règle l'affichage du rouge |
 | Lumière de l'atelier | 6 lumières (normale, plus sombre, contraste faible, gamma, jaune, ombre) × 3 intensités. Ce sont les mêmes transformations que celles du membre 1 |
 | Étiquette de verdict | « Conforme » ou « Défaut détecté », avec une phrase simple, une jauge score/limite et un conseil quand la lumière trompe le modèle |
-| Méthode | Modèle d'origine ou LightShift |
+| Méthode | Modèle d'origine ou LightShift pour le verdict principal |
+| Les deux méthodes sur la même pièce | **Comparaison côte à côte** : même photo, même lumière, PatchCore d'origine à gauche, LightShift à droite |
+| Comment le score dérive avec la lumière | **Vue de dérive** : score de la pièce sous les 15 lumières, pour les deux méthodes, avec la limite. Survol pour les valeurs, tableau dans « Voir les valeurs » |
 | Recalibrer | Brique B3 : nouvelle limite calculée à partir de pièces saines sous la lumière choisie |
 | Pièces inspectées | Historique des dernières inspections avec leur verdict |
 
@@ -68,6 +70,14 @@ La méthode LightShift avec le vrai modèle attend le code du membre 2 :
 - [ ] Le score d'une image correspond à celui des scripts d'évaluation du membre 1
 - [ ] Noter le temps d'analyse CPU dans le rapport
 
+## Intégration continue
+
+`.github/workflows/tests.yml` lance à chaque push :
+1. les tests sur Python 3.11 et 3.12 ;
+2. la construction de l'image Docker, puis un appel à `/health` pour vérifier qu'elle démarre.
+
+Le résultat apparaît dans l'onglet **Actions** du dépôt GitHub.
+
 ## Docker
 
 ```bash
@@ -81,11 +91,11 @@ INSTALL_PATCHCORE=true MODEL_BACKEND=patchcore docker compose up --build   # vra
 python -m pytest -q
 ```
 
-Les 37 tests couvrent : le contrat de sortie, les images invalides, vides ou manquantes, les
+Les 40 tests couvrent : le contrat de sortie, les images invalides, vides ou manquantes, les
 paramètres invalides, le déterminisme, la calibration (mise à jour, minimum d'images, par
 catégorie, remise à zéro, persistance), la baisse des fausses alertes après recalibration, la
 robustesse de LightShift, la garantie FPR ≤ α sur données simulées, le modèle absent (503), les
-pièces d'exemple et l'interface servie.
+pièces d'exemple, l'interface servie, la vue de dérive et les percentiles de latence.
 
 ## Scénario de démo pour le jury (≈ 2 minutes)
 
@@ -94,7 +104,8 @@ pièces d'exemple et l'interface servie.
 3. **Pièce saine + lumière jaune** → fausse alerte. Le conseil explique que c'est la lumière qui trompe le modèle.
 4. **Recalibrer pour cette lumière** → la limite monte et la pièce saine redevient conforme.
 5. **Pièce abîmée sous la même lumière** → toujours détectée.
-6. **Méthode LightShift** → pas de fausse alerte, même sans recalibrer. **Ombre sur le côté** montre sa limite.
+6. **Les deux méthodes sur la même pièce** → sous lumière jaune, le modèle d'origine se trompe et LightShift non.
+7. **Vue de dérive** → d'un coup d'œil, le score du modèle d'origine monte avec chaque lumière, alors que LightShift reste stable, **sauf à l'ombre**.
 
 ## Structure
 

@@ -207,3 +207,37 @@ def test_patchcore_backend_without_checkpoints_is_degraded(tmp_path, monkeypatch
     c = TestClient(create_app(backend="patchcore", state_dir=tmp_path))
     assert c.get("/health").json()["status"] == "degraded"
     assert post_predict(c, normal_image()).status_code == 503
+
+
+# ------------------------------------------------------------------ /drift
+def test_drift_returns_16_conditions_per_method(client):
+    r = client.post("/drift", data={"category": "screw"},
+                    files={"image": ("x.png", png_bytes(normal_image()), "image/png")})
+    assert r.status_code == 200, r.text
+    series = {s["method"]: s for s in r.json()["series"]}
+    assert set(series) == {"baseline", "lightshift"}
+    for s in series.values():
+        assert len(s["points"]) == 16
+        assert s["points"][0]["shift"] is None and s["points"][0]["severity"] is None
+        assert s["error"] is None
+    base = series["baseline"]["points"]
+    # Sous lumière normale, la pièce saine est conforme ; sous lumière jaune forte, fausse alerte.
+    assert base[0]["alert"] is False
+    yellow3 = next(p for p in base if p["shift"] == "color_temperature" and p["severity"] == 3)
+    assert yellow3["alert"] is True
+
+
+def test_drift_uses_calibrated_threshold(client):
+    client.post("/calibrate", data={"category": "screw", "alpha": "0.1"}, files=calib_files(10))
+    r = client.post("/drift", data={"category": "screw"},
+                    files={"image": ("x.png", png_bytes(normal_image()), "image/png")}).json()
+    base = next(s for s in r["series"] if s["method"] == "baseline")
+    assert base["threshold_source"] == "calibrated"
+
+
+def test_metrics_latency_percentiles(client):
+    assert client.get("/metrics").json()["latency_ms"]["p95"] is None
+    for i in range(5):
+        post_predict(client, normal_image(i))
+    lat = client.get("/metrics").json()["latency_ms"]
+    assert lat["window"] == 5 and 0 < lat["p50"] <= lat["p95"]

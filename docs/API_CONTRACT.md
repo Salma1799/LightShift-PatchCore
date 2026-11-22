@@ -13,8 +13,9 @@ Documentation interactive : `http://localhost:8000/docs` (générée automatique
 | `/predict` | POST | Analyser une image → score, décision, carte d'anomalie |
 | `/calibrate` | POST | Brique B3 : recalculer le seuil avec des images normales d'un nouvel éclairage |
 | `/calibrate/{category}` | DELETE | Revenir au seuil par défaut |
+| `/drift` | POST | Vue de dérive : score d'une image sous les 16 conditions de lumière, pour les deux méthodes |
 | `/examples/{category}` | GET | Pièce d'exemple synthétique PNG (`kind=good|bad`, `seed`), pour la démo |
-| `/metrics` | GET | Compteurs (nombre d'analyses, décisions, temps moyen, seuils actuels) |
+| `/metrics` | GET | Compteurs (analyses, décisions, latence moyenne, **p50 et p95**, seuils actuels) |
 
 Valeurs autorisées :
 - `category` : `metal_nut`, `screw`, `transistor`
@@ -84,6 +85,47 @@ Réponse 200 :
 Les seuils recalibrés sont enregistrés dans `app_state/thresholds.json` et survivent à un redémarrage.
 
 ⚠️ Les images envoyées à `/calibrate` ne doivent pas être réutilisées pour évaluer le modèle.
+
+## POST /drift (vue de dérive des scores)
+
+Requête `multipart/form-data` : `image` (PNG/JPG) et `category`.
+
+L'image est analysée sous la lumière normale puis sous les 15 conditions de l'expérience
+(5 lumières × 3 intensités), par les deux méthodes. Réponse :
+
+```json
+{
+  "category": "screw",
+  "series": [
+    {
+      "method": "baseline", "threshold": 0.5, "threshold_source": "default", "error": null,
+      "points": [
+        {"shift": null, "severity": null, "score": 0.41, "alert": false},
+        {"shift": "brightness", "severity": 1, "score": 0.63, "alert": true}
+      ]
+    },
+    {"method": "lightshift", "...": "..."}
+  ]
+}
+```
+
+Si une méthode n'est pas encore disponible (LightShift avant la livraison du membre 2),
+`points` est vide et `error` explique pourquoi.
+
+## GET /metrics
+
+```json
+{
+  "predict_requests": 42, "predict_errors": 0,
+  "decisions": {"normal": 30, "anomaly": 12}, "calibrations": 2,
+  "mean_inference_ms": 31.4,
+  "latency_ms": {"p50": 28.0, "p95": 55.2, "window": 42},
+  "thresholds": {"baseline:screw": {"threshold": 0.62, "source": "calibrated"}}
+}
+```
+
+Les percentiles portent sur les 500 dernières analyses (`window`). Ils répondent à la question
+QR5 du sujet (coût en latence).
 
 ## Codes d'erreur
 
