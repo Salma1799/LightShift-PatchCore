@@ -494,7 +494,7 @@
   const state = {
     category: "metal_nut", method: "baseline", shift: null, severity: 2, alpha: 0.1,
     source: "generated", image: null,   // { blob, name, kind: "good"|"bad"|"upload", url }
-    backend: null, history: [], requestId: 0, calibratedFor: null, driftFor: null, examplesSource: {},
+    backend: null, history: [], requestId: 0, calibratedFor: null, driftFor: null, examplesSource: {}, calibPool: {},
   };
 
   const $ = (id) => document.getElementById(id);
@@ -527,6 +527,7 @@
       const h = await api("/health");
       state.backend = h.model_backend;
       state.examplesSource = h.examples_source || {};
+      state.calibPool = h.calibration_pool || {};
       updateRecalHint();
       if (h.status !== "ok") { st.dataset.state = "down"; st.lastElementChild.textContent = "Modèle indisponible"; showBanner("Le modèle n'est pas chargé (fichiers du modèle manquants). Les analyses sont impossibles pour l'instant."); }
       else if (h.model_backend === "mock") { st.dataset.state = "demo"; st.lastElementChild.textContent = "Modèle de démonstration"; st.title = "Les scores sont simulés : le vrai PatchCore n'est pas encore branché."; }
@@ -830,7 +831,9 @@
     const real = (state.examplesSource || {})[state.category] === "mvtec";
     $("recalSourceHint").textContent = state.source === "generated"
       ? (real
-        ? `On prend ${Math.max(20, need)} photos saines MVTec réservées à la recalibration (jamais proposées à l'essai) et on leur applique la lumière choisie.`
+        ? (((state.calibPool || {})[state.category] ?? 0) < need
+          ? `Seulement ${(state.calibPool || {})[state.category] ?? 0} photos saines MVTec sont réservées à la recalibration pour cette pièce : il en faut au moins ${need} pour ce réglage. Choisissez une tolérance plus large.`
+          : `On prend ${Math.min((state.calibPool || {})[state.category], Math.max(20, need))} photos saines MVTec réservées à la recalibration (jamais proposées à l'essai) et on leur applique la lumière choisie.`)
         : `On génère ${Math.max(20, need)} pièces saines et on leur applique la lumière choisie (au moins ${need} sont nécessaires pour ce réglage).`)
       : (files.length ? `${files.length} photo(s) choisie(s). Il en faut au moins ${need}.` : `Choisissez au moins ${need} photos de pièces saines prises sous la nouvelle lumière.`);
   }
@@ -842,7 +845,10 @@
       const fd = new FormData();
       fd.append("category", state.category); fd.append("alpha", String(state.alpha)); fd.append("method", state.method);
       if (state.source === "generated") {
-        const n = Math.max(20, minImages(state.alpha));
+        const need = minImages(state.alpha), pool = (state.calibPool || {})[state.category];
+        if (pool != null && pool < need)
+          throw new Error(`Il n'y a que ${pool} photos saines réservées à la recalibration pour cette pièce, alors qu'il en faut au moins ${need} pour ce réglage. Choisissez une tolérance plus large (1 sur 10 ou 1 sur 5), ou importez vos propres photos.`);
+        const n = pool != null ? Math.min(pool, Math.max(20, need)) : Math.max(20, need);
         const blobs = await Promise.all([...Array(n)].map((_, i) => exampleBlob("calibration", i)));
         blobs.forEach((b, i) => fd.append("images", b, `saine-${i}.png`));
         if (state.shift) { fd.append("shift", state.shift); fd.append("severity", String(state.severity)); }

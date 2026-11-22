@@ -167,7 +167,9 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         return HealthResponse(status="ok" if ready else "degraded", model_loaded=ready,
                               model_backend=model.name, model_version=model.version,
                               categories=config.CATEGORIES, methods=config.METHODS,
-                              examples_source={c: examples_source(c) for c in config.CATEGORIES})
+                              examples_source={c: examples_source(c) for c in config.CATEGORIES},
+                              calibration_pool={c: (len(mvtec.calibration_good(c)) if examples_source(c) == "mvtec" else None)
+                                                for c in config.CATEGORIES})
 
     @api.post("/predict", response_model=PredictResponse, responses=ERRORS)
     async def predict(

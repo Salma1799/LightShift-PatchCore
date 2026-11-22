@@ -55,6 +55,10 @@ def pick(category: str, kind: str, seed: int, defect: Optional[str] = None) -> P
             "bad": lambda: defect_images(category, defect)}[kind]()
     if not pool:
         raise FileNotFoundError(f"Aucune photo MVTec '{kind}' pour {category} dans {category_root(category)}")
+    if kind == "calibration" and seed >= len(pool):
+        # Pas de reprise en boucle : une photo comptée deux fois fausserait la garantie de B3.
+        raise FileNotFoundError(
+            f"Seulement {len(pool)} photos saines MVTec sont réservées à la recalibration pour {category}.")
     return pool[seed % len(pool)]
 
 

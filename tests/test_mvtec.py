@@ -47,7 +47,7 @@ def test_forced_mvtec_mode_serves_real_photos(fake_mvtec, tmp_path, monkeypatch)
 def test_trial_and_calibration_photos_never_overlap(fake_mvtec, tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.EXAMPLES_SOURCE", "mvtec")
     c = TestClient(create_app(backend="mock", state_dir=tmp_path))
-    trial, calib = set(names(c, "good", 10)), set(names(c, "calibration", 10))
+    trial, calib = set(names(c, "good", 10)), set(names(c, "calibration", 5))
     assert len(trial) == 5 and len(calib) == 5          # 10 photos good -> deux moitiés
     assert trial.isdisjoint(calib)
     assert all("train" not in n for n in trial | calib)
@@ -65,3 +65,13 @@ def test_missing_category_photos_gives_clear_404(fake_mvtec, tmp_path, monkeypat
     c = TestClient(create_app(backend="mock", state_dir=tmp_path))
     r = c.get("/examples/transistor", params={"kind": "good"})
     assert r.status_code == 404 and "transistor" in r.json()["detail"]
+
+
+def test_calibration_pool_never_repeats_a_photo(fake_mvtec, tmp_path, monkeypatch):
+    """10 photos good -> 5 réservées à la calibration : la 6e demande est refusée, pas recyclée."""
+    monkeypatch.setattr("app.config.EXAMPLES_SOURCE", "mvtec")
+    c = TestClient(create_app(backend="mock", state_dir=tmp_path))
+    assert c.get("/health").json()["calibration_pool"]["screw"] == 5
+    assert c.get("/examples/screw", params={"kind": "calibration", "seed": 4}).status_code == 200
+    r = c.get("/examples/screw", params={"kind": "calibration", "seed": 5})
+    assert r.status_code == 404 and "5 photos" in r.json()["detail"]
