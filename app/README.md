@@ -96,6 +96,15 @@ MVTec et avec `pre_trained=False`, faute d'accès aux poids ImageNet : chargemen
 défauts, recalibration, dérive, catégorie sans checkpoint (503), LightShift pas encore livré (501).
 **À refaire avec les vrais checkpoints** grâce à `scripts/check_patchcore.py`.
 
+## Tester sans rien installer : GitHub Codespaces
+
+1. Sur la page GitHub du dépôt, choisir la branche `feature/app-api`.
+2. **Code → Codespaces → Create codespace on feature/app-api** (l'installation prend 2 à 3 minutes).
+3. Dans le terminal du Codespace : `python -m uvicorn app.api.main:app --host 0.0.0.0`
+4. L'interface s'ouvre dans un nouvel onglet (port 8000, « Interface LightShift »).
+
+Penser à arrêter le Codespace après le test (**Codespaces → Stop**), pour ne pas consommer le quota gratuit.
+
 ## Intégration continue
 
 `.github/workflows/tests.yml` lance à chaque push :
