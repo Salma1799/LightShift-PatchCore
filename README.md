@@ -480,6 +480,18 @@ The evaluation scripts require the trained model checkpoints and the locally pre
 A FastAPI service and a web interface ("inspection bench") to use and demonstrate PatchCore under
 lighting changes. The interface is served by the API itself: one program to run.
 
+![Demo: a healthy part triggers a false alarm under yellow light, then passes after recalibration](docs/images/demo.gif)
+
+| Defect detected (red = suspicious areas) | False alarm caused by yellow light | After recalibration (B3) |
+|---|---|---|
+| ![Defect detected](docs/images/01-defaut-detecte.jpg) | ![False alarm under yellow light](docs/images/02-fausse-alerte-lumiere.jpg) | ![After recalibration](docs/images/03-apres-recalibration.jpg) |
+
+| Original PatchCore vs LightShift on the same part | Score drift across the 15 lighting conditions |
+|---|---|
+| ![Side-by-side comparison](docs/images/04-comparaison-cote-a-cote.jpg) | ![Score drift view](docs/images/05-derive-des-scores.jpg) |
+
+*Screenshots taken in demo mode (drawn parts, demo model): they illustrate the interface, not experimental results.*
+
 ### Run it
 
 **Windows:** double-click `run_app.bat` (first run creates `.venv` and installs the dependencies).

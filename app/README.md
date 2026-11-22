@@ -8,6 +8,18 @@ Photo ──► /predict ──► modèle (démo ou PatchCore) ──► score 
 Pièces saines sous la nouvelle lumière ──► /calibrate ──► nouvelle limite (brique B3)
 ```
 
+![Démo : une pièce saine déclenche une fausse alerte sous lumière jaune, puis redevient conforme après recalibration](../docs/images/demo.gif)
+
+| Défaut détecté | Fausse alerte due à la lumière jaune | Après recalibration (B3) |
+|---|---|---|
+| ![Défaut détecté](../docs/images/01-defaut-detecte.jpg) | ![Fausse alerte](../docs/images/02-fausse-alerte-lumiere.jpg) | ![Après recalibration](../docs/images/03-apres-recalibration.jpg) |
+
+| Les deux méthodes sur la même pièce | Dérive du score selon la lumière |
+|---|---|
+| ![Comparaison côte à côte](../docs/images/04-comparaison-cote-a-cote.jpg) | ![Vue de dérive](../docs/images/05-derive-des-scores.jpg) |
+
+*Captures en mode démo (pièces dessinées, modèle de démonstration) : elles illustrent l'interface, pas des résultats expérimentaux.*
+
 ## Lancer en local
 
 ```powershell
