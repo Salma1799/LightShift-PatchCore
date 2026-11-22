@@ -4,6 +4,7 @@ Lancer :  uvicorn app.api.main:app --reload
 Docs   :  http://localhost:8000/docs
 """
 
+import base64
 import math
 import threading
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from app import config
 from app.api.schemas import CalibrateResponse, ErrorResponse, HealthResponse, PredictResponse
@@ -18,7 +20,10 @@ from app.core.conformal import conformal_threshold, is_anomaly, min_calibration_
 from app.core.imaging import InvalidImageError, decode_image, encode_png_base64, heatmap_overlay
 from app.core.lighting import apply_lighting_shift
 from app.core.thresholds import ThresholdStore
+from app.models.examples import draw_part
 from app.models.registry import build_model
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 ERRORS = {400: {"model": ErrorResponse}, 422: {"model": ErrorResponse},
           501: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
@@ -98,6 +103,20 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
             raise HTTPException(503, str(exc)) from exc
 
     # ---------------------------------------------------------------- routes
+    @api.get("/", include_in_schema=False)
+    def interface():
+        """Interface web (banc d'inspection)."""
+        return FileResponse(WEB_DIR / "index.html", media_type="text/html")
+
+    @api.get("/examples/{category}", responses={200: {"content": {"image/png": {}}}})
+    def example(category: str, kind: str = "good", seed: int = 1):
+        """Pièce d'exemple synthétique (saine ou abîmée) pour la démo."""
+        check_category(category)
+        if kind not in ("good", "bad"):
+            raise HTTPException(422, "kind doit valoir 'good' (saine) ou 'bad' (abîmée).")
+        png = base64.b64decode(encode_png_base64(draw_part(category, kind == "bad", seed)))
+        return Response(content=png, media_type="image/png")
+
     @api.get("/health", response_model=HealthResponse)
     def health():
         ready = model.is_ready()
@@ -139,7 +158,7 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         return PredictResponse(
             category=category, method=method, score=round(pred.score, 6),
             threshold=round(threshold, 6), threshold_source=source, decision=decision,
-            anomaly_map=encode_png_base64(heatmap_overlay(rgb, pred.anomaly_map)),
+            anomaly_map=encode_png_base64(heatmap_overlay(rgb, pred.anomaly_map, threshold)),
             processed_image=encode_png_base64(rgb) if shift else None,
             applied_shift=shift, applied_severity=severity if shift else None,
             inference_time_ms=round(elapsed_ms, 2),
@@ -152,6 +171,8 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         category: str = Form(...),
         alpha: float = Form(0.1, description="Taux de fausses alertes visé, ex. 0.1 = 10 %"),
         method: str = Form("baseline"),
+        shift: Optional[str] = Form(None, description="Optionnel (démo) : appliquer ce changement d'éclairage aux images"),
+        severity: int = Form(1, description="Niveau du changement d'éclairage : 1, 2 ou 3"),
     ):
         """Brique B3 : recalcule le seuil à partir d'images normales du nouvel éclairage.
 
@@ -159,6 +180,10 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         """
         check_category(category)
         check_method(method)
+        if shift is not None and shift not in config.SHIFTS:
+            raise HTTPException(422, f"Shift inconnu '{shift}'. Valeurs : {config.SHIFTS}")
+        if severity not in config.SEVERITIES:
+            raise HTTPException(422, f"Sévérité invalide {severity}. Valeurs : {config.SEVERITIES}")
         if not 0 < alpha < 1:
             raise HTTPException(422, "alpha doit être strictement entre 0 et 1.")
         if len(images) > config.MAX_CALIBRATION_IMAGES:
@@ -173,6 +198,8 @@ def create_app(backend: Optional[str] = None, state_dir: Optional[Path] = None) 
         scores = []
         for upload in images:
             rgb = await read_image(upload)
+            if shift is not None:
+                rgb = apply_lighting_shift(rgb, shift, severity)
             scores.append(run_model(rgb, category, method).score)
 
         new_threshold = conformal_threshold(scores, alpha)

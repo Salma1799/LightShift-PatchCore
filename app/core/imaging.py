@@ -28,14 +28,21 @@ def encode_png_base64(rgb: np.ndarray) -> str:
     return base64.b64encode(png.tobytes()).decode("ascii")
 
 
-def heatmap_overlay(rgb: np.ndarray, anomaly_map: np.ndarray, opacity: float = 0.45) -> np.ndarray:
-    """Superpose la carte d'anomalie (normalisée 0..1 sur l'image) à l'image d'origine."""
+def heatmap_overlay(rgb: np.ndarray, anomaly_map: np.ndarray, threshold: float = 0.5,
+                    color=(200, 55, 45), max_opacity: float = 0.75) -> np.ndarray:
+    """Teinte en rouge les zones suspectes, sur une échelle fixe liée à la limite.
+
+    anomaly_map est sur la même échelle que le score : sous 70 % de la limite, rien n'est
+    teinté ; à 130 % de la limite et au-delà, la teinte est maximale. Une pièce saine reste
+    donc propre, au lieu d'être recolorée entièrement comme avec une normalisation min-max.
+    """
     h, w = rgb.shape[:2]
     amap = anomaly_map.astype(np.float32)
     if amap.shape != (h, w):
         amap = cv2.resize(amap, (w, h), interpolation=cv2.INTER_LINEAR)
-    lo, hi = float(amap.min()), float(amap.max())
-    norm = (amap - lo) / (hi - lo) if hi > lo else np.zeros_like(amap)
-    colored = cv2.applyColorMap((norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
-    colored = cv2.cvtColor(colored, cv2.COLOR_BGR2RGB)
-    return cv2.addWeighted(rgb, 1 - opacity, colored, opacity, 0)
+    lo, hi = 0.7 * threshold, 1.3 * threshold
+    alpha = np.clip((amap - lo) / max(hi - lo, 1e-6), 0.0, 1.0)[..., None] * max_opacity
+    tint = np.empty_like(rgb, dtype=np.float32)
+    tint[:] = color
+    out = rgb.astype(np.float32) * (1 - alpha) + tint * alpha
+    return np.clip(out, 0, 255).astype(np.uint8)

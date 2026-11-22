@@ -20,5 +20,5 @@ ENV PYTHONPATH=/code \
     MODEL_BACKEND=mock \
     STATE_DIR=/code/app_state
 
-EXPOSE 8000 8501
+EXPOSE 8000
 CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

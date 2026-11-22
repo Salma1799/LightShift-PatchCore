@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
+from app.core.lighting import apply_lighting_shift
+from app.models.examples import draw_part
 
 
 def png_bytes(rgb: np.ndarray) -> bytes:
@@ -14,17 +16,12 @@ def png_bytes(rgb: np.ndarray) -> bytes:
     return buf.tobytes()
 
 
-def normal_image(seed: int = 0, size: int = 128) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    base = np.full((size, size, 3), 115, dtype=np.float32)
-    base += rng.normal(0, 3, size=base.shape)
-    return np.clip(base, 0, 255).astype(np.uint8)
+def normal_image(seed: int = 1) -> np.ndarray:
+    return draw_part("screw", False, seed)
 
 
-def defect_image() -> np.ndarray:
-    img = normal_image(99)
-    cv2.circle(img, (64, 64), 10, (255, 255, 255), -1)
-    return img
+def defect_image(seed: int = 1) -> np.ndarray:
+    return draw_part("screw", True, seed)
 
 
 @pytest.fixture
@@ -59,7 +56,7 @@ def test_predict_output_contract(client):
     assert body["threshold_source"] == "default"
     heat = cv2.imdecode(np.frombuffer(base64.b64decode(body["anomaly_map"]), np.uint8),
                         cv2.IMREAD_COLOR)
-    assert heat.shape[:2] == (128, 128)
+    assert heat.shape[:2] == normal_image().shape[:2]
 
 
 def test_predict_is_deterministic(client):
@@ -110,17 +107,15 @@ def test_predict_requires_image(client):
 
 
 # ------------------------------------------------------------------ /calibrate
-def calib_files(n, shift_brightness=0):
-    files = []
-    for i in range(n):
-        img = np.clip(normal_image(i).astype(int) + shift_brightness, 0, 255).astype(np.uint8)
-        files.append(("images", (f"n{i}.png", png_bytes(img), "image/png")))
-    return files
+def calib_files(n, start=500):
+    return [("images", (f"n{i}.png", png_bytes(normal_image(start + i)), "image/png"))
+            for i in range(n)]
 
 
 def test_calibrate_updates_threshold(client):
-    r = client.post("/calibrate", data={"category": "screw", "alpha": "0.1"},
-                    files=calib_files(20, shift_brightness=-70))
+    r = client.post("/calibrate", data={"category": "screw", "alpha": "0.1",
+                                        "shift": "brightness", "severity": "2"},
+                    files=calib_files(20))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["n_images"] == 20
@@ -135,14 +130,34 @@ def test_calibrate_updates_threshold(client):
 def test_calibration_reduces_false_alarms_under_lighting_shift(client):
     """Scénario de la démo : sous un éclairage sombre, le seuil par défaut déclenche
     de fausses alertes ; après /calibrate sur d'autres images normales, elles baissent."""
-    dark = lambda i: np.clip(normal_image(i).astype(int) - 70, 0, 255).astype(np.uint8)
-    test_ids = range(100, 130)
-    before = sum(post_predict(client, dark(i)).json()["decision"] == "anomaly" for i in test_ids)
+    shift = {"shift": "color_temperature", "severity": "2"}
+    test_ids = range(100, 120)
+    before = sum(post_predict(client, normal_image(i), **shift).json()["decision"] == "anomaly"
+                 for i in test_ids)
+    client.post("/calibrate", data={"category": "screw", "alpha": "0.1", **shift},
+                files=calib_files(20))
+    after = sum(post_predict(client, normal_image(i), **shift).json()["decision"] == "anomaly"
+                for i in test_ids)
+    assert before >= 15 and after <= 5
 
-    client.post("/calibrate", data={"category": "screw", "alpha": "0.1"},
-                files=calib_files(20, shift_brightness=-70))
-    after = sum(post_predict(client, dark(i)).json()["decision"] == "anomaly" for i in test_ids)
-    assert before > after
+
+def test_lightshift_method_is_more_robust_than_baseline(client):
+    """Mode démo : la normalisation par canal (idée B2) évite la fausse alerte sous lumière jaune."""
+    shift = {"shift": "color_temperature", "severity": "2"}
+    base = post_predict(client, normal_image(3), **shift).json()
+    light = post_predict(client, normal_image(3), method="lightshift", **shift).json()
+    assert base["decision"] == "anomaly" and light["decision"] == "normal"
+
+
+def test_example_endpoint_returns_png(client):
+    r = client.get("/examples/transistor", params={"kind": "bad", "seed": 4})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert client.get("/examples/transistor", params={"kind": "weird"}).status_code == 422
+
+
+def test_interface_is_served(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "LightShift" in r.text
 
 
 def test_calibrate_rejects_too_few_images(client):

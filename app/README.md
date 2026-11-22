@@ -1,107 +1,114 @@
 # Application LightShift-PatchCore (membre 3)
 
-API FastAPI + interface Streamlit pour utiliser et démontrer PatchCore sous changement d'éclairage.
+Une API FastAPI et une interface web « banc d'inspection » pour utiliser et démontrer PatchCore
+sous changement d'éclairage. L'interface est servie par l'API elle-même : un seul programme à lancer.
 
 ```
-Image ──► /predict ──► modèle (mock ou PatchCore) ──► score + seuil ──► ✅ normal / ❌ défaut + carte
-Images normales du nouvel éclairage ──► /calibrate ──► nouveau seuil (brique B3)
+Photo ──► /predict ──► modèle (démo ou PatchCore) ──► score + limite ──► Conforme / Défaut + zones en rouge
+Pièces saines sous la nouvelle lumière ──► /calibrate ──► nouvelle limite (brique B3)
 ```
+
+## Lancer en local
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1          # Linux/Mac : source .venv/bin/activate
+python -m pip install -r requirements-app.txt
+python -m uvicorn app.api.main:app --reload
+```
+
+Ouvrir ensuite :
+- **http://localhost:8000** : l'interface
+- **http://localhost:8000/docs** : la documentation de l'API
+
+## L'interface
+
+| Zone | À quoi elle sert |
+|---|---|
+| Cabine | Déposer une photo, ou essayer une pièce saine ou abîmée générée. Le curseur « Zones suspectes » règle l'affichage du rouge |
+| Lumière de l'atelier | 6 lumières (normale, plus sombre, contraste faible, gamma, jaune, ombre) × 3 intensités. Ce sont les mêmes transformations que celles du membre 1 |
+| Étiquette de verdict | « Conforme » ou « Défaut détecté », avec une phrase simple, une jauge score/limite et un conseil quand la lumière trompe le modèle |
+| Méthode | Modèle d'origine ou LightShift |
+| Recalibrer | Brique B3 : nouvelle limite calculée à partir de pièces saines sous la lumière choisie |
+| Pièces inspectées | Historique des dernières inspections avec leur verdict |
+
+## Le modèle de démonstration (`MODEL_BACKEND=mock`, par défaut)
+
+C'est un **mini-PatchCore sans réseau de neurones** (`app/models/mock.py`). Il garde en mémoire des
+patchs de pièces d'exemple saines et compare chaque patch au plus proche voisin. Il reproduit donc
+le comportement du vrai modèle :
+
+- une pièce abîmée est détectée ;
+- un changement de lumière provoque de **fausses alertes** sur les pièces saines ;
+- la **recalibration** (B3) supprime ces fausses alertes ;
+- la méthode « LightShift » (normalisation par canal, idée de B2) résiste à la plupart des lumières,
+  **sauf à l'ombre**, qui est un gradient spatial. C'est la même limite que dans les résultats du membre 1.
+
+⚠️ Ses scores n'ont aucune valeur scientifique. Il est pensé pour les pièces d'exemple : une vraie
+photo MVTec sera jugée « inconnue ». Pour MVTec, il faut le vrai modèle.
+
+## Passer au vrai PatchCore
+
+1. Installer : `python -m pip install -r requirements.txt` (torch CPU + anomalib 2.7.1).
+2. Placer les 3 checkpoints : `results/Patchcore/MVTecAD/<category>/latest/weights/lightning/model.ckpt`.
+3. Lancer :
+   ```powershell
+   $env:MODEL_BACKEND="patchcore"; python -m uvicorn app.api.main:app
+   ```
+4. Vérifier que l'en-tête de l'interface indique « PatchCore connecté ».
+
+La méthode LightShift avec le vrai modèle attend le code du membre 2 :
+`_predict_lightshift()` dans `app/models/patchcore_backend.py`.
+
+### Checklist à la réception des checkpoints
+
+- [ ] `/health` renvoie `ok` avec `MODEL_BACKEND=patchcore`
+- [ ] Une image `test/good` et une image défectueuse donnent des scores cohérents (défaut > normal)
+- [ ] Les zones rouges tombent sur le défaut (comparer au masque `ground_truth`)
+- [ ] Le score d'une image correspond à celui des scripts d'évaluation du membre 1
+- [ ] Noter le temps d'analyse CPU dans le rapport
+
+## Docker
+
+```bash
+docker compose up --build                                        # mode démo
+INSTALL_PATCHCORE=true MODEL_BACKEND=patchcore docker compose up --build   # vrai modèle
+```
+
+## Tests
+
+```bash
+python -m pytest -q
+```
+
+Les 37 tests couvrent : le contrat de sortie, les images invalides, vides ou manquantes, les
+paramètres invalides, le déterminisme, la calibration (mise à jour, minimum d'images, par
+catégorie, remise à zéro, persistance), la baisse des fausses alertes après recalibration, la
+robustesse de LightShift, la garantie FPR ≤ α sur données simulées, le modèle absent (503), les
+pièces d'exemple et l'interface servie.
+
+## Scénario de démo pour le jury (≈ 2 minutes)
+
+1. **Pièce saine, lumière normale** → Conforme.
+2. **Pièce abîmée** → Défaut détecté, avec la rayure en rouge.
+3. **Pièce saine + lumière jaune** → fausse alerte. Le conseil explique que c'est la lumière qui trompe le modèle.
+4. **Recalibrer pour cette lumière** → la limite monte et la pièce saine redevient conforme.
+5. **Pièce abîmée sous la même lumière** → toujours détectée.
+6. **Méthode LightShift** → pas de fausse alerte, même sans recalibrer. **Ombre sur le côté** montre sa limite.
 
 ## Structure
 
 ```
 app/
-├── config.py                  # catégories, méthodes, variables d'environnement
-├── api/
-│   ├── main.py                # endpoints /health /predict /calibrate /metrics
-│   └── schemas.py             # format des réponses (contrat D11)
-├── core/
-│   ├── conformal.py           # seuil conforme (B3)
-│   ├── imaging.py             # lecture d'image, carte de chaleur, base64
-│   ├── lighting.py            # réutilise apply_shift() du membre 1 pour la démo
-│   └── thresholds.py          # sauvegarde des seuils recalibrés
-├── models/
-│   ├── base.py                # interface commune : predict() -> Prediction(score, anomaly_map)
-│   ├── mock.py                # faux modèle (développement, tests)
-│   ├── patchcore_backend.py   # vrais checkpoints anomalib (+ emplacement méthode membre 2)
-│   └── registry.py            # choix du modèle via MODEL_BACKEND
-└── ui/streamlit_app.py        # interface (4 onglets)
-tests/                         # 34 tests pytest
-docs/API_CONTRACT.md           # contrat d'API à valider en équipe
-Dockerfile, docker-compose.yml
+├── api/main.py            # endpoints + sert l'interface
+├── api/schemas.py         # format des réponses (contrat D11)
+├── core/conformal.py      # seuil conforme (B3)
+├── core/imaging.py        # lecture d'image, zones rouges, base64
+├── core/lighting.py       # réutilise apply_shift() du membre 1
+├── core/thresholds.py     # sauvegarde des limites recalibrées
+├── models/examples.py     # pièces d'exemple (écrou, vis, transistor)
+├── models/mock.py         # mini-PatchCore de démonstration
+├── models/patchcore_backend.py  # vrais checkpoints + emplacement du membre 2
+├── models/registry.py     # choix du modèle (MODEL_BACKEND)
+└── web/index.html         # interface (HTML/CSS/JS, aucune dépendance)
 ```
-
-## Lancer en local (mode démo, sans checkpoints)
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate            # Windows   (Linux/Mac : source .venv/bin/activate)
-pip install -r requirements-app.txt
-
-# Terminal 1 : l'API  ->  http://localhost:8000/docs
-uvicorn app.api.main:app --reload
-
-# Terminal 2 : l'interface  ->  http://localhost:8501
-streamlit run app/ui/streamlit_app.py
-```
-
-## Passer au vrai PatchCore
-
-1. Installer les dépendances lourdes : `pip install -r requirements.txt` (torch CPU + anomalib 2.7.1).
-2. Placer les 3 checkpoints de la baseline ici :
-   `results/Patchcore/MVTecAD/<category>/latest/weights/lightning/model.ckpt`
-   (ou indiquer un autre dossier avec `CHECKPOINT_ROOT`).
-3. Lancer l'API avec le vrai modèle :
-   ```bash
-   set MODEL_BACKEND=patchcore        # Linux/Mac : export MODEL_BACKEND=patchcore
-   uvicorn app.api.main:app
-   ```
-4. Vérifier `/health` : `"status": "ok"` et `"model_backend": "patchcore"`.
-
-⚠️ Le branchement PatchCore n'a pas encore pu être exécuté sans les checkpoints : c'est la
-première chose à vérifier quand on les reçoit (voir la checklist plus bas).
-
-## Docker
-
-```bash
-docker compose up --build                       # mode démo (léger)
-# Vrai modèle : checkpoints dans results/Patchcore/ puis
-INSTALL_PATCHCORE=true MODEL_BACKEND=patchcore docker compose up --build
-```
-API sur http://localhost:8000, interface sur http://localhost:8501.
-
-## Tests
-
-```bash
-pytest -q
-```
-
-Couvre : contrat de sortie, images invalides/vides/manquantes, paramètres invalides,
-déterminisme, calibration (mise à jour, minimum d'images, par catégorie, remise à zéro,
-persistance), baisse des fausses alertes après recalibration, garantie FPR ≤ α sur données
-simulées, modèle absent (503).
-
-## Interface : les 4 onglets
-
-| Onglet | Utilité |
-|---|---|
-| 🖼️ Analyser | Charger une image → décision, score, carte d'anomalie |
-| 💡 Comparer sous éclairage | Même image sous l'éclairage d'origine vs modifié ; option baseline vs LightShift |
-| 🎯 Recalibrer | Envoyer des images normales du nouvel éclairage → nouveau seuil (B3) |
-| 📊 État du système | Nombre d'analyses, défauts, temps moyen, seuils actuels |
-
-## Scénario de démo (D15)
-
-1. Onglet Analyser : une vis **normale** (`test/good`) → ✅ ; une vis **défectueuse** → ❌ avec la zone en rouge.
-2. Onglet Comparer : la vis normale sous `color_temperature` niveau 3 → le score monte, fausse alerte possible.
-3. Onglet Recalibrer : envoyer ~20 images `train/good` transformées avec le même éclairage
-   (dossier `data/processed/<category>/train/color_temperature/severity_3/good/`).
-4. Retour à Comparer : même image → le seuil recalibré évite la fausse alerte, le défaut reste détecté.
-
-## Checklist à la réception des checkpoints
-
-- [ ] `/health` renvoie `ok` avec `MODEL_BACKEND=patchcore`
-- [ ] `/predict` sur une image `test/good` et une image défectueuse : scores cohérents (défaut > normal)
-- [ ] La carte d'anomalie est bien placée sur le défaut (comparer au masque `ground_truth`)
-- [ ] Le score d'une image correspond à celui obtenu par les scripts d'évaluation du membre 1
-- [ ] Noter le temps d'inférence CPU dans le rapport

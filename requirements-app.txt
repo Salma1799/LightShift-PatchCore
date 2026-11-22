@@ -1,4 +1,4 @@
-# Dépendances de l'application (API + interface), mode "mock".
+# Dépendances de l'application (API + interface web), mode démo.
 # Pour le vrai PatchCore, installer en plus requirements.txt (torch + anomalib).
 fastapi>=0.115
 uvicorn[standard]>=0.30
@@ -6,8 +6,6 @@ python-multipart>=0.0.9
 pydantic>=2.7
 numpy>=1.26
 opencv-python-headless>=4.9
-streamlit>=1.45
-requests>=2.31
 
 # Tests
 pytest>=8

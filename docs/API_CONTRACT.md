@@ -8,10 +8,12 @@ Documentation interactive : `http://localhost:8000/docs` (générée automatique
 
 | Endpoint | Méthode | Rôle |
 |---|---|---|
+| `/` | GET | Interface web (banc d'inspection) |
 | `/health` | GET | L'API et le modèle sont-ils prêts ? |
 | `/predict` | POST | Analyser une image → score, décision, carte d'anomalie |
 | `/calibrate` | POST | Brique B3 : recalculer le seuil avec des images normales d'un nouvel éclairage |
 | `/calibrate/{category}` | DELETE | Revenir au seuil par défaut |
+| `/examples/{category}` | GET | Pièce d'exemple synthétique PNG (`kind=good|bad`, `seed`), pour la démo |
 | `/metrics` | GET | Compteurs (nombre d'analyses, décisions, temps moyen, seuils actuels) |
 
 Valeurs autorisées :
@@ -61,6 +63,7 @@ Règle de décision : `decision = "anomaly"` si `score > threshold` (inégalité
 | `category` | oui | Catégorie |
 | `alpha` | non (0.1) | Taux de fausses alertes visé (0 < alpha < 1) |
 | `method` | non (`baseline`) | Méthode dont on recalibre le seuil |
+| `shift`, `severity` | non | **Démo uniquement** : applique ce changement d'éclairage aux images avant le calcul |
 
 Calcul (identique à B3) : scores triés s(1) ≤ … ≤ s(n), `k = ceil((n+1)(1-alpha))`, seuil = s(k).
 Si `n` est trop petit (`k > n`), l'API refuse avec une erreur 422 qui indique le nombre minimum
